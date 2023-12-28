@@ -878,11 +878,17 @@ void save_state(void *ctx, char *dst, char*modes) {
     }
 }
 
-void* llama_allocate_params(const char *prompt, int seed, int threads, int tokens, int top_k,
-                            float top_p, float temp, float repeat_penalty, int repeat_last_n, bool ignore_eos, int n_batch, int n_keep, const char** antiprompt, int antiprompt_count,
-                             float tfs_z, float typical_p, float frequency_penalty, float presence_penalty, int mirostat, float mirostat_eta, float mirostat_tau, bool penalize_nl, const char *logit_bias, const char *session_file, bool prompt_cache_all, bool mlock, bool mmap,
-                             const char *maingpu,const char *tensorsplit , bool prompt_cache_ro, const char *grammar,
-                             float rope_freq_base, float rope_freq_scale, float negative_prompt_scale, const char* negative_prompt, int n_draft) {
+void* llama_allocate_params(const char *prompt, int seed, int threads, int tokens,
+                            int top_k, float top_p, float temp, float repeat_penalty,
+                            int repeat_last_n, bool ignore_eos, bool memory_f16,
+                            int n_batch, int n_keep, const char** antiprompt, int antiprompt_count,
+                            float tfs_z, float typical_p, float frequency_penalty, float presence_penalty,
+                            int mirostat, float mirostat_eta, float mirostat_tau, bool penalize_nl,
+                            const char *logit_bias, const char *session_file, bool prompt_cache_all,
+                            bool mlock, bool mmap, const char *maingpu, const char *tensorsplit,
+                            bool prompt_cache_ro, const char *grammar, float rope_freq_base,
+                            float rope_freq_scale, float negative_prompt_scale,
+                            const char* negative_prompt,int n_draft) {
     gpt_params* params = new gpt_params;
     params->seed = seed;
     params->n_threads = threads;
@@ -953,7 +959,24 @@ void* llama_allocate_params(const char *prompt, int seed, int threads, int token
     return params;
 }
 
-void* load_model(const char *fname, int n_ctx, int n_seed, bool mlock, bool embeddings, bool mmap, int n_gpu_layers, int n_batch, const char *maingpu, const char *tensorsplit, bool numa, float rope_freq_base, float rope_freq_scale, bool mul_mat_q, const char *lora, const char *lora_base, bool perplexity) {
+void* load_model(const char *fname,
+                 int n_ctx,
+                 int n_seed,
+                 bool mlock,
+                 bool embeddings,
+                 bool mmap,
+                 bool low_vram,
+                 int n_gpu_layers,
+                 int n_batch,
+                 const char *maingpu,
+                 const char *tensorsplit,
+                 bool numa,
+                 float rope_freq_base,
+                 float rope_freq_scale,
+                 bool mul_mat_q,
+                 const char *lora,
+                 const char *lora_base,
+                 bool perplexity) {
    return load_binding_model(fname, n_ctx, n_seed, false, mlock, embeddings, mmap, false, n_gpu_layers, n_batch, maingpu, tensorsplit, numa, rope_freq_base, rope_freq_scale, mul_mat_q, lora, lora_base, perplexity);
 }
 
