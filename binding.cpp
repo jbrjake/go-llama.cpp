@@ -962,6 +962,7 @@ void* llama_allocate_params(const char *prompt, int seed, int threads, int token
 void* load_model(const char *fname,
                  int n_ctx,
                  int n_seed,
+                 bool memory_f16, 
                  bool mlock,
                  bool embeddings,
                  bool mmap,
