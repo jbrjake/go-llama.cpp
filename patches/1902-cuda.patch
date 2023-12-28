@@ -32,7 +32,7 @@ index b3425ab..88fe0f2 100644
 +    return lparams;
 +}
 +
-+void* load_binding_model(const char *fname, int n_ctx, int n_seed, bool mlock, bool embeddings, bool mmap, int n_gpu_layers, int n_batch, const char *maingpu, const char *tensorsplit, bool numa,  float rope_freq_base, float rope_freq_scale, bool mul_mat_q, const char *lora, const char *lora_base, bool perplexity) {
++void* load_binding_model(const char *fname, int n_ctx, int n_seed, bool memory_f16, bool mlock, bool embeddings, bool mmap, bool low_vram, int n_gpu_layers, int n_batch, const char *maingpu, const char *tensorsplit, bool numa,  float rope_freq_base, float rope_freq_scale, bool mul_mat_q, const char *lora, const char *lora_base, bool perplexity) {
 +    // load the model
 +    gpt_params * lparams;
 +// Temporary workaround for https://github.com/go-skynet/go-llama.cpp/issues/218
