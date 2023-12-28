@@ -1,10 +1,10 @@
 diff --git a/common/common.cpp b/common/common.cpp
-index 2597ba0..e42ae73 100644
+index b3425ab..88fe0f2 100644
 --- a/common/common.cpp
 +++ b/common/common.cpp
-@@ -1268,3 +1268,218 @@ void dump_non_result_info_yaml(FILE * stream, const gpt_params & params, const l
-     fprintf(stream, "typical_p: %f # default: 1.0\n", params.typical_p);
-     fprintf(stream, "verbose_prompt: %s # default: false\n", params.verbose_prompt ? "true" : "false");
+@@ -1614,3 +1614,215 @@ void dump_kv_cache_view_seqs(const llama_kv_cache_view & view, int row_size) {
+ 
+     printf("\n=== Done dumping\n");
  }
 +
 +gpt_params* create_gpt_params(const std::string& fname,const std::string& lora,const std::string& lora_base) {
@@ -14,7 +14,9 @@ index 2597ba0..e42ae73 100644
 +    // Initialize the 'model' member with the 'fname' parameter
 +    lparams->model = fname;
 +    lparams->lora_base = lora_base;
-+    lparams->lora_adapter = lora;
++    std::vector<std::tuple<std::string, float>> lora_vector;
++    lora_vector.push_back(make_tuple(lora, 1.0f));
++    lparams->lora_adapter = lora_vector;
 +    if (lparams->lora_adapter.empty()) {
 +        lparams->use_mmap = false;
 +    }
@@ -30,7 +32,7 @@ index 2597ba0..e42ae73 100644
 +    return lparams;
 +}
 +
-+void* load_binding_model(const char *fname, int n_ctx, int n_seed, bool memory_f16, bool mlock, bool embeddings, bool mmap, bool low_vram, int n_gpu_layers, int n_batch, const char *maingpu, const char *tensorsplit, bool numa,  float rope_freq_base, float rope_freq_scale, bool mul_mat_q, const char *lora, const char *lora_base, bool perplexity) {
++void* load_binding_model(const char *fname, int n_ctx, int n_seed, bool mlock, bool embeddings, bool mmap, int n_gpu_layers, int n_batch, const char *maingpu, const char *tensorsplit, bool numa,  float rope_freq_base, float rope_freq_scale, bool mul_mat_q, const char *lora, const char *lora_base, bool perplexity) {
 +    // load the model
 +    gpt_params * lparams;
 +// Temporary workaround for https://github.com/go-skynet/go-llama.cpp/issues/218
@@ -45,14 +47,12 @@ index 2597ba0..e42ae73 100644
 +    llama_context * ctx;
 +    lparams->n_ctx      = n_ctx;
 +    lparams->seed       = n_seed;
-+    lparams->memory_f16     = memory_f16;
 +    lparams->embedding  = embeddings;
 +    lparams->use_mlock  = mlock;
 +    lparams->n_gpu_layers = n_gpu_layers;
-+    lparams->perplexity = perplexity;
++    lparams->logits_all = perplexity;
 +    lparams->use_mmap = mmap;
 +
-+    lparams->low_vram = low_vram;
 +    if (rope_freq_base != 0.0f) {
 +        lparams->rope_freq_base = rope_freq_base;
 +    } else {
@@ -115,28 +115,28 @@ index 2597ba0..e42ae73 100644
 +
 +    struct gpt_params params = *g_params;
 +    const int n_ctx   = llama_n_ctx(ctx);
-+    const int n_vocab = llama_n_vocab(ctx);
++    const int n_vocab = llama_n_vocab(llama_get_model(ctx));
 +
-+    const float   temp            = params.temp;
-+    const int32_t top_k           = params.top_k <= 0 ? n_vocab : params.top_k;
-+    const float   top_p           = params.top_p;
-+    const float   tfs_z           = params.tfs_z;
-+    const float   typical_p       = params.typical_p;
-+    const int32_t repeat_last_n   = params.repeat_last_n < 0 ? n_ctx : params.repeat_last_n;
-+    const float   repeat_penalty  = params.repeat_penalty;
-+    const float   alpha_presence  = params.presence_penalty;
-+    const float   alpha_frequency = params.frequency_penalty;
-+    const int     mirostat        = params.mirostat;
-+    const float   mirostat_tau    = params.mirostat_tau;
-+    const float   mirostat_eta    = params.mirostat_eta;
-+    const bool    penalize_nl     = params.penalize_nl;
++    const float   temp            = params.sparams.temp;
++    const int32_t top_k           = params.sparams.top_k <= 0 ? n_vocab : params.sparams.top_k;
++    const float   top_p           = params.sparams.top_p;
++    const float   tfs_z           = params.sparams.tfs_z;
++    const float   typical_p       = params.sparams.typical_p;
++    const int32_t repeat_last_n   = params.sparams.penalty_last_n < 0 ? n_ctx : params.sparams.penalty_last_n;
++    const float   repeat_penalty  = params.sparams.penalty_repeat;
++    const float   alpha_presence  = params.sparams.penalty_present;
++    const float   alpha_frequency = params.sparams.penalty_freq;
++    const int     mirostat        = params.sparams.mirostat;
++    const float   mirostat_tau    = params.sparams.mirostat_tau;
++    const float   mirostat_eta    = params.sparams.mirostat_eta;
++    const bool    penalize_nl     = params.sparams.penalize_nl;
 +
 +    llama_token id = 0;
 +
 +    float * logits = llama_get_logits(ctx) + idx * n_vocab;
 +
 +    // Apply params.logit_bias map
-+    for (auto it = params.logit_bias.begin(); it != params.logit_bias.end(); it++) {
++    for (auto it = params.sparams.logit_bias.begin(); it != params.sparams.logit_bias.end(); it++) {
 +        logits[it->first] += it->second;
 +    }
 +
@@ -148,24 +148,21 @@ index 2597ba0..e42ae73 100644
 +    llama_token_data_array cur_p = { candidates.data(), candidates.size(), false };
 +
 +    if (ctx_guidance) {
-+        llama_sample_classifier_free_guidance(ctx, &cur_p, ctx_guidance, params.cfg_scale);
++        llama_sample_classifier_free_guidance(ctx, &cur_p, ctx_guidance, params.sparams.cfg_scale);
 +    }
 +
 +    // apply penalties
 +    if (!last_tokens.empty()) {
-+        const float nl_logit = logits[llama_token_nl(ctx)];
++        const float nl_logit = logits[llama_token_nl(llama_get_model(ctx))];
 +        const int last_n_repeat = std::min(std::min((int)last_tokens.size(), repeat_last_n), n_ctx);
 +
-+        llama_sample_repetition_penalty(ctx, &cur_p,
-+                last_tokens.data() + last_tokens.size() - last_n_repeat,
-+                last_n_repeat, repeat_penalty);
-+        llama_sample_frequency_and_presence_penalties(ctx, &cur_p,
-+                last_tokens.data() + last_tokens.size() - last_n_repeat,
-+                last_n_repeat, alpha_frequency, alpha_presence);
++        llama_sample_repetition_penalties(ctx, &cur_p,
++        last_tokens.data() + last_tokens.size() - last_n_repeat,
++        last_n_repeat, repeat_penalty, alpha_frequency, alpha_presence);
 +
 +        if (!penalize_nl) {
 +            for (size_t idx = 0; idx < cur_p.size; idx++) {
-+                if (cur_p.data[idx].id == llama_token_nl(ctx)) {
++                if (cur_p.data[idx].id == llama_token_nl(llama_get_model(ctx))) {
 +                    cur_p.data[idx].logit = nl_logit;
 +                    break;
 +                }
@@ -223,14 +220,13 @@ index 2597ba0..e42ae73 100644
 +}
 \ No newline at end of file
 diff --git a/common/common.h b/common/common.h
-index 18aea38..ca7a168 100644
+index 9659aa0..1b409e0 100644
 --- a/common/common.h
 +++ b/common/common.h
-@@ -209,3 +209,19 @@ std::string get_sortable_timestamp();
- void dump_non_result_info_yaml(
-     FILE * stream, const gpt_params & params, const llama_context * lctx,
-     const std::string & timestamp, const std::vector<int> & prompt_tokens, const char * model_desc);
-+
+@@ -241,3 +241,18 @@ void dump_kv_cache_view(const llama_kv_cache_view & view, int row_size = 80);
+ // Dump the KV cache view showing individual sequences in each cell (long output).
+ void dump_kv_cache_view_seqs(const llama_kv_cache_view & view, int row_size = 40);
+ 
 +struct llama_binding_state {
 +    llama_context * ctx;
 +    llama_model * model;
