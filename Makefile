@@ -233,10 +233,11 @@ binding.o: prepare llama.cpp/ggml.o llama.cpp/llama.o llama.cpp/common.o llama.c
 ## https://github.com/ggerganov/llama.cpp/pull/1902
 prepare:
 	cd llama.cpp && patch -p1 < ../patches/1902-cuda.patch
+	make build-info.o
 	touch $@
 
 libbinding.a: prepare binding.o llama.cpp/quants.o llama.cpp/grammar-parser.o llama.cpp/ggml-alloc.o $(EXTRA_TARGETS)
-	ar src libbinding.a llama.cpp/ggml.o llama.cpp/quants.o $(EXTRA_TARGETS) llama.cpp/ggml-alloc.o llama.cpp/common.o llama.cpp/grammar-parser.o llama.cpp/llama.o binding.o
+	ar src libbinding.a llama.cpp/build-info.o llama.cpp/ggml.o llama.cpp/quants.o $(EXTRA_TARGETS) llama.cpp/ggml-alloc.o llama.cpp/common.o llama.cpp/grammar-parser.o llama.cpp/llama.o binding.o
 
 clean:
 	rm -rf *.o
