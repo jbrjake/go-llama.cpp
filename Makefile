@@ -218,8 +218,8 @@ llama.cpp/ggml-opencl.o: llama.cpp/ggml.o
 llama.cpp/ggml-metal.o: llama.cpp/ggml.o
 	cd build && cp -rf CMakeFiles/ggml.dir/ggml-metal.m.o ../llama.cpp/ggml-metal.o
 
-llama.cpp/k_quants.o: llama.cpp/ggml.o
-	cd build && cp -rf CMakeFiles/ggml.dir/k_quants.c.o ../llama.cpp/k_quants.o
+llama.cpp/quants.o: llama.cpp/ggml.o
+	cd build && cp -rf CMakeFiles/ggml.dir/ggml-quants.c.o ../llama.cpp/quants.o
 
 llama.cpp/llama.o:
 	cd build && cp -rf CMakeFiles/llama.dir/llama.cpp.o ../llama.cpp/llama.o
@@ -235,8 +235,8 @@ prepare:
 	cd llama.cpp && patch -p1 < ../patches/1902-cuda.patch
 	touch $@
 
-libbinding.a: prepare binding.o llama.cpp/k_quants.o llama.cpp/grammar-parser.o llama.cpp/ggml-alloc.o $(EXTRA_TARGETS)
-	ar src libbinding.a llama.cpp/ggml.o llama.cpp/k_quants.o $(EXTRA_TARGETS) llama.cpp/ggml-alloc.o llama.cpp/common.o llama.cpp/grammar-parser.o llama.cpp/llama.o binding.o
+libbinding.a: prepare binding.o llama.cpp/quants.o llama.cpp/grammar-parser.o llama.cpp/ggml-alloc.o $(EXTRA_TARGETS)
+	ar src libbinding.a llama.cpp/ggml.o llama.cpp/quants.o $(EXTRA_TARGETS) llama.cpp/ggml-alloc.o llama.cpp/common.o llama.cpp/grammar-parser.o llama.cpp/llama.o binding.o
 
 clean:
 	rm -rf *.o

@@ -49,19 +49,19 @@ int get_embeddings(void* params_ptr, void* state_pr, float * res_embeddings) {
   
     int n_past = 0;
 
-    const bool add_bos = llama_vocab_type(ctx) == LLAMA_VOCAB_TYPE_SPM;
+    const bool add_bos = llama_vocab_type(llama_get_model(ctx)) == LLAMA_VOCAB_TYPE_SPM;
     // tokenize the prompt
     auto embd_inp = ::llama_tokenize(ctx, params.prompt, add_bos);
 
 
     if (embd_inp.size() > 0) {
-        if (llama_eval(ctx, embd_inp.data(), embd_inp.size(), n_past, params.n_threads)) {
+        if (llama_eval(ctx, embd_inp.data(), embd_inp.size(), n_past)) {
             fprintf(stderr, "%s : failed to eval\n", __func__);
             return 1;
         }
     }
 
-    const int n_embd = llama_n_embd(ctx);
+    const int n_embd = llama_n_embd(llama_get_model(ctx));
 
     const auto embeddings = llama_get_embeddings(ctx);
 
@@ -95,11 +95,11 @@ int eval(void* params_ptr,void* state_pr,char *text) {
     llama_context* ctx = state->ctx;
 
     auto n_past = 0;
-    auto last_n_tokens_data = std::vector<llama_token>(params_p->repeat_last_n, 0);
+    auto last_n_tokens_data = std::vector<llama_token>(params_p->sparams.penalty_last_n, 0);
 
     auto tokens = std::vector<llama_token>(params_p->n_ctx);
     std::string str = std::string(text);
-    auto n_prompt_tokens = llama_tokenize(ctx, str.data(), str.length(), tokens.data(), tokens.size(), true);
+    auto n_prompt_tokens = llama_tokenize(llama_get_model(ctx), str.data(), str.length(), tokens.data(), tokens.size(), true, false);
 
     if (n_prompt_tokens < 1) {
         fprintf(stderr, "%s : failed to tokenize prompt\n", __func__);
@@ -107,7 +107,7 @@ int eval(void* params_ptr,void* state_pr,char *text) {
     }
 
     // evaluate prompt
-    return llama_eval(ctx, tokens.data(), n_prompt_tokens, n_past, params_p->n_threads);
+    return llama_eval(ctx, tokens.data(), n_prompt_tokens, n_past);
 }
 
 static llama_context ** g_ctx;
@@ -150,7 +150,7 @@ int llama_predict(void* params_ptr, void* state_pr, char* result, bool debug) {
     llama_context * ctx_guidance = NULL;
     g_ctx = &ctx;
     
-    if (params.cfg_scale > 1.f) {
+    if (params.sparams.cfg_scale > 1.f) {
         struct llama_context_params lparams = llama_context_params_from_gpt_params(params);
         ctx_guidance = llama_new_context_with_model(state->model, lparams);
     }
@@ -185,7 +185,7 @@ int llama_predict(void* params_ptr, void* state_pr, char* result, bool debug) {
             }
         }
     }
-    const bool add_bos = llama_vocab_type(ctx) == LLAMA_VOCAB_TYPE_SPM;
+    const bool add_bos = llama_vocab_type(llama_get_model(ctx)) == LLAMA_VOCAB_TYPE_SPM;
 
     std::vector<llama_token> embd_inp;
     if ( !params.prompt.empty() || session_tokens.empty() ) {
@@ -196,14 +196,14 @@ int llama_predict(void* params_ptr, void* state_pr, char* result, bool debug) {
 
     // Should not run without any tokens
     if (embd_inp.empty()) {
-        embd_inp.push_back(llama_token_bos(ctx));
+        embd_inp.push_back(llama_token_bos(llama_get_model(ctx)));
     }
     // Tokenize negative prompt
     std::vector<llama_token> guidance_inp;
     int guidance_offset = 0;
     int original_prompt_len = 0;
     if (ctx_guidance) {
-        guidance_inp = ::llama_tokenize(ctx_guidance, params.cfg_negative_prompt, add_bos);
+        guidance_inp = ::llama_tokenize(ctx_guidance, params.sparams.cfg_negative_prompt, add_bos);
         std::vector<llama_token> original_inp = ::llama_tokenize(ctx, params.prompt, add_bos);
         original_prompt_len = original_inp.size();
         guidance_offset = (int)guidance_inp.size() - original_prompt_len;
@@ -251,7 +251,7 @@ int llama_predict(void* params_ptr, void* state_pr, char* result, bool debug) {
 
     if (debug && ctx_guidance) {
             fprintf(stderr, "\n");
-            fprintf(stderr, "%s: negative prompt: '%s'\n", __func__, params.cfg_negative_prompt.c_str());
+            fprintf(stderr, "%s: negative prompt: '%s'\n", __func__, params.sparams.cfg_negative_prompt.c_str());
             fprintf(stderr, "%s: number of tokens in negative prompt = %zu\n", __func__, guidance_inp.size());
             for (int i = 0; i < (int) guidance_inp.size(); i++) {
                 fprintf(stderr, "%6d -> '%s'\n", guidance_inp[i], llama_token_to_piece(ctx, guidance_inp[i]).c_str());
@@ -260,8 +260,8 @@ int llama_predict(void* params_ptr, void* state_pr, char* result, bool debug) {
 
     struct llama_grammar * grammar = NULL;
     grammar_parser::parse_state parsed_grammar;
-    if (!params.grammar.empty()) {
-        parsed_grammar = grammar_parser::parse(params.grammar.c_str());
+    if (!params.sparams.grammar.empty()) {
+        parsed_grammar = grammar_parser::parse(params.sparams.grammar.c_str());
         // will be empty (default) if there are parse errors
         if (parsed_grammar.rules.empty()) {
             return 1;
@@ -271,8 +271,8 @@ int llama_predict(void* params_ptr, void* state_pr, char* result, bool debug) {
         fprintf(stderr, "\n");
 
         {
-            auto it = params.logit_bias.find(llama_token_eos(ctx));
-            if (it != params.logit_bias.end() && it->second == -INFINITY) {
+            auto it = params.sparams.logit_bias.find(llama_token_eos(llama_get_model(ctx)));
+            if (it != params.sparams.logit_bias.end() && it->second == -INFINITY) {
                 fprintf(stderr,
                     "%s: warning: EOS token is disabled, which will cause most grammars to fail\n", __func__);
             }
@@ -306,15 +306,15 @@ int llama_predict(void* params_ptr, void* state_pr, char* result, bool debug) {
 
     std::vector<llama_token> embd;
     std::vector<llama_token> embd_guidance;
-    const int n_vocab = llama_n_vocab(ctx);
+    const int n_vocab = llama_n_vocab(llama_get_model(ctx));
     std::vector<llama_token_data> candidates;
     candidates.reserve(n_vocab);
 
     std::string res = "";
 
     {
-        const std::vector<llama_token> tmp = { llama_token_bos(ctx), };
-        llama_eval(ctx, tmp.data(), tmp.size(), 0, params.n_threads);
+        const std::vector<llama_token> tmp = { llama_token_bos(llama_get_model(ctx)), };
+        llama_eval(ctx, (llama_token *)tmp.data(), tmp.size(), 0);
         llama_reset_timings(ctx);
     }
     
@@ -409,7 +409,7 @@ int llama_predict(void* params_ptr, void* state_pr, char* result, bool debug) {
 
                 for (int i = 0; i < input_size; i += params.n_batch) {
                     int n_eval = std::min(input_size - i, params.n_batch);
-                    if (llama_eval(ctx_guidance, input_buf + i, n_eval, n_past_guidance, params.n_threads)) {
+                    if (llama_eval(ctx_guidance, input_buf + i, n_eval, n_past_guidance)) {
                         fprintf(stderr, "%s : failed to eval\n", __func__);
                         return 1;
                     }
@@ -424,7 +424,7 @@ int llama_predict(void* params_ptr, void* state_pr, char* result, bool debug) {
                 if (n_eval > params.n_batch) {
                     n_eval = params.n_batch;
                 }
-                if (llama_eval(ctx, &embd[i], n_eval, n_past, params.n_threads)) {
+                if (llama_eval(ctx, &embd[i], n_eval, n_past)) {
                     fprintf(stderr, "%s : failed to eval\n", __func__);
                     return 1;
                 }
@@ -526,7 +526,7 @@ int llama_predict(void* params_ptr, void* state_pr, char* result, bool debug) {
         }
       
         // end of text token
-        if (!embd.empty() && embd.back() == llama_token_eos(ctx)) {
+        if (!embd.empty() && embd.back() == llama_token_eos(llama_get_model(ctx))) {
                 break;
         }
     }
@@ -592,15 +592,15 @@ int speculative_sampling(void* params_ptr, void* target_model, void* draft_model
     const auto t_enc_start = ggml_time_us();
 
     // eval the prompt with both models
-    llama_eval(ctx_tgt,  inp.data(), int(inp.size() - 1), 0, params.n_threads);
-    llama_eval(ctx_tgt, &inp.back(),      1, inp.size() - 1, params.n_threads);
-    llama_eval(ctx_dft,  inp.data(),     int(inp.size()), 0, params.n_threads);
+    llama_eval(ctx_tgt,  inp.data(), int(inp.size() - 1), 0);
+    llama_eval(ctx_tgt, &inp.back(),      1, inp.size() - 1);
+    llama_eval(ctx_dft,  inp.data(),     int(inp.size()), 0);
 
     const auto t_enc_end = ggml_time_us();
 
     // the 2 models should have the same vocab
     const int n_ctx   = llama_n_ctx(ctx_tgt);
-    const int n_vocab = llama_n_vocab(ctx_tgt);
+    const int n_vocab = llama_n_vocab(llama_get_model(ctx_tgt));
     //GGML_ASSERT(n_vocab == llama_n_vocab(ctx_dft));
 
     // how many tokens to draft each time
@@ -636,8 +636,8 @@ int speculative_sampling(void* params_ptr, void* target_model, void* draft_model
     grammar_parser::parse_state parsed_grammar;
 
     // if requested - load the grammar, error checking is omitted for brevity
-    if (!params.grammar.empty()) {
-        parsed_grammar = grammar_parser::parse(params.grammar.c_str());
+    if (!params.sparams.grammar.empty()) {
+        parsed_grammar = grammar_parser::parse(params.sparams.grammar.c_str());
         // will be empty (default) if there are parse errors
         if (parsed_grammar.rules.empty()) {
             return 1;
@@ -655,7 +655,7 @@ int speculative_sampling(void* params_ptr, void* target_model, void* draft_model
             // sample from the target model
 
             // const llama_token id = llama_sample_token(ctx_tgt, NULL, grammar_tgt, params, last_tokens, candidates, i_dft);
-            const llama_token id = llama_sample_token_binding(ctx_tgt, NULL, grammar_tgt, params_p, last_tokens, candidates, i_dft);
+            llama_token id = llama_sample_token_binding(ctx_tgt, NULL, grammar_tgt, params_p, last_tokens, candidates, i_dft);
             // remember which tokens were sampled - used for repetition penalties during sampling
             last_tokens.erase(last_tokens.begin());
             last_tokens.push_back(id);
@@ -668,7 +668,7 @@ int speculative_sampling(void* params_ptr, void* target_model, void* draft_model
             }       
             res += token_str.c_str();
         
-            if (id == llama_token_eos(ctx_tgt)) {
+            if (id == llama_token_eos(llama_get_model(ctx_tgt))) {
                 has_eos = true;
             }
 
@@ -693,7 +693,7 @@ int speculative_sampling(void* params_ptr, void* target_model, void* draft_model
             }
 
             // the drafted token was rejected or we are out of drafted tokens
-            llama_eval(ctx_dft, &id, 1, n_past_dft, params.n_threads);
+            llama_eval(ctx_dft, &id, 1, n_past_dft);
             ++n_past_dft;
 
             drafted.clear();
@@ -756,7 +756,7 @@ int speculative_sampling(void* params_ptr, void* target_model, void* draft_model
             }
 
             // evaluate the drafted token on the draft model
-            llama_eval(ctx_dft, &drafted.back(), 1, n_past_cur, params.n_threads);
+            llama_eval(ctx_dft, &drafted.back(), 1, n_past_cur);
             ++n_past_cur;
 
             if (grammar_dft != NULL) {
@@ -765,7 +765,7 @@ int speculative_sampling(void* params_ptr, void* target_model, void* draft_model
         }
 
         // evaluate the target model on the drafted tokens
-        llama_eval(ctx_tgt, drafted.data(), drafted.size(), n_past_tgt, params.n_threads);
+        llama_eval(ctx_tgt, drafted.data(), drafted.size(), n_past_tgt);
         ++n_past_tgt;
         
         // the first token is always proposed by the traget model before the speculation loop
@@ -819,9 +819,9 @@ int llama_tokenize_string(void* params_ptr, void* state_pr, int* result) {
     llama_binding_state* state = (llama_binding_state*) state_pr;
     llama_context* ctx = state->ctx;
 
-    const bool add_bos = llama_vocab_type(ctx) == LLAMA_VOCAB_TYPE_SPM;
+    const bool add_bos = llama_vocab_type(llama_get_model(ctx)) == LLAMA_VOCAB_TYPE_SPM;
 
-    return llama_tokenize(ctx, params_p->prompt.data(), params_p->prompt.length(), result, params_p->n_ctx, add_bos);
+    return llama_tokenize(llama_get_model(ctx), params_p->prompt.data(), params_p->prompt.length(), result, params_p->n_ctx, add_bos, false);
 }
 
 
@@ -879,7 +879,7 @@ void save_state(void *ctx, char *dst, char*modes) {
 }
 
 void* llama_allocate_params(const char *prompt, int seed, int threads, int tokens, int top_k,
-                            float top_p, float temp, float repeat_penalty, int repeat_last_n, bool ignore_eos, bool memory_f16, int n_batch, int n_keep, const char** antiprompt, int antiprompt_count,
+                            float top_p, float temp, float repeat_penalty, int repeat_last_n, bool ignore_eos, int n_batch, int n_keep, const char** antiprompt, int antiprompt_count,
                              float tfs_z, float typical_p, float frequency_penalty, float presence_penalty, int mirostat, float mirostat_eta, float mirostat_tau, bool penalize_nl, const char *logit_bias, const char *session_file, bool prompt_cache_all, bool mlock, bool mmap,
                              const char *maingpu,const char *tensorsplit , bool prompt_cache_ro, const char *grammar,
                              float rope_freq_base, float rope_freq_scale, float negative_prompt_scale, const char* negative_prompt, int n_draft) {
@@ -887,22 +887,21 @@ void* llama_allocate_params(const char *prompt, int seed, int threads, int token
     params->seed = seed;
     params->n_threads = threads;
     params->n_predict = tokens;
-    params->repeat_last_n = repeat_last_n;
+    params->sparams.penalty_last_n = repeat_last_n;
     params->prompt_cache_ro = prompt_cache_ro;
-    params->top_k = top_k;
-    params->top_p = top_p;
-    params->memory_f16 = memory_f16;
-    params->temp = temp;
+    params->sparams.top_k = top_k;
+    params->sparams.top_p = top_p;
+    params->sparams.temp = temp;
     params->use_mmap = mmap;
     params->use_mlock = mlock;
-    params->repeat_penalty = repeat_penalty;
+    params->sparams.penalty_repeat = repeat_penalty;
     params->n_batch = n_batch;
     params->n_keep = n_keep;
-    params->grammar = std::string(grammar);
+    params->sparams.grammar = std::string(grammar);
     params->rope_freq_base = rope_freq_base;
     params->rope_freq_scale = rope_freq_scale;
-    params->cfg_scale = negative_prompt_scale;
-    params->cfg_negative_prompt = std::string(negative_prompt);
+    params->sparams.cfg_scale = negative_prompt_scale;
+    params->sparams.cfg_negative_prompt = std::string(negative_prompt);
     params->n_draft = n_draft;
     if (maingpu[0] != '\0') { 
         params->main_gpu = std::stoi(maingpu);
@@ -934,28 +933,28 @@ void* llama_allocate_params(const char *prompt, int seed, int threads, int token
     if(antiprompt_count > 0) {
       params->antiprompt = create_vector(antiprompt, antiprompt_count);
     }
-    params->tfs_z = tfs_z;
-    params->typical_p = typical_p;
-    params->presence_penalty = presence_penalty;
-    params->mirostat = mirostat;
-    params->mirostat_eta = mirostat_eta;
-    params->mirostat_tau = mirostat_tau;
-    params->penalize_nl = penalize_nl;
+    params->sparams.tfs_z = tfs_z;
+    params->sparams.typical_p = typical_p;
+    params->sparams.penalty_present = presence_penalty;
+    params->sparams.mirostat = mirostat;
+    params->sparams.mirostat_eta = mirostat_eta;
+    params->sparams.mirostat_tau = mirostat_tau;
+    params->sparams.penalize_nl = penalize_nl;
     std::stringstream ss(logit_bias);
     llama_token key;
     char sign;
     std::string value_str;
     if (ss >> key && ss >> sign && std::getline(ss, value_str) && (sign == '+' || sign == '-')) {
-        params->logit_bias[key] = std::stof(value_str) * ((sign == '-') ? -1.0f : 1.0f);
+        params->sparams.logit_bias[key] = std::stof(value_str) * ((sign == '-') ? -1.0f : 1.0f);
     } 
-    params->frequency_penalty = frequency_penalty;
+    params->sparams.penalty_freq = frequency_penalty;
     params->prompt = prompt;
     
     return params;
 }
 
-void* load_model(const char *fname, int n_ctx, int n_seed, bool memory_f16, bool mlock, bool embeddings, bool mmap, bool low_vram, int n_gpu_layers, int n_batch, const char *maingpu, const char *tensorsplit, bool numa, float rope_freq_base, float rope_freq_scale, bool mul_mat_q, const char *lora, const char *lora_base, bool perplexity) {
-   return load_binding_model(fname, n_ctx, n_seed, memory_f16, mlock, embeddings, mmap, low_vram, n_gpu_layers, n_batch, maingpu, tensorsplit, numa, rope_freq_base, rope_freq_scale, mul_mat_q, lora, lora_base, perplexity);
+void* load_model(const char *fname, int n_ctx, int n_seed, bool mlock, bool embeddings, bool mmap, int n_gpu_layers, int n_batch, const char *maingpu, const char *tensorsplit, bool numa, float rope_freq_base, float rope_freq_scale, bool mul_mat_q, const char *lora, const char *lora_base, bool perplexity) {
+   return load_binding_model(fname, n_ctx, n_seed, false, mlock, embeddings, mmap, false, n_gpu_layers, n_batch, maingpu, tensorsplit, numa, rope_freq_base, rope_freq_scale, mul_mat_q, lora, lora_base, perplexity);
 }
 
 /*
